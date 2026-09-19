@@ -10,10 +10,12 @@ Every edit is run three ways and the decodes compared:
 model genuinely rid of it. A trial only tells us anything when those two part
 ways, so `references_diverge` gates every count.
 
-Leyline reports its splice tracking `full`, which is the residue their positional
-contract leaves behind. SCM recomputes under the edited context, so it should
-track `reprefill` by construction. Running both through the same verdict is the
-experiment.
+Leyline reports its splice tracking `full`, and reads that as the contract
+holding: the edit was positional, and the cache keeping its history is the
+intended behavior. We read the same result as the problem, since a deletion that
+leaves the deleted content steering the model has not deleted much. SCM
+recomputes under the edited context, so it should track `reprefill` by
+construction. Putting both through one verdict is the experiment.
 
 Metrics follow theirs so the numbers line up: first-token agreement, mean common
 prefix over a greedy decode, KL, and top-k overlap. Tensor distance is rel-L2 in
