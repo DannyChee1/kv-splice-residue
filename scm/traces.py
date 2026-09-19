@@ -82,16 +82,19 @@ class Trigger:
 
 @dataclass(frozen=True, slots=True)
 class ContextChange:
-    """An edit to the previous turn's messages.
+    """An edit to the history, applied between two turns.
 
-    Spans are half-open [start, end) positions in that earlier list. We count
-    messages rather than tokens because tokenizing happens later.
+    Spans are half-open [start, end) positions in the list as it stood when the
+    edit landed, which `view_size` records. That list is longer than the previous
+    turn's prompt, since the agent's own reply and any tool output joined it
+    since. We count messages rather than tokens because tokenizing happens later.
     """
 
     kind: ChangeKind
     decider: Decider
     removed_spans: tuple[tuple[int, int], ...] = ()
     inserted: tuple[Message, ...] = ()
+    view_size: int | None = None
     trigger: Trigger | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -103,6 +106,10 @@ class ContextChange:
         for (_, prev_end), (next_start, _) in zip(ordered, ordered[1:]):
             if next_start < prev_end:
                 raise SchemaError("spans overlap")
+        if self.view_size is not None and ordered and ordered[-1][1] > self.view_size:
+            raise SchemaError(
+                f"span ends at {ordered[-1][1]}, view held {self.view_size}"
+            )
 
     @property
     def removed_count(self) -> int:
@@ -114,6 +121,8 @@ class ContextChange:
             d["removed_spans"] = [list(s) for s in self.removed_spans]
         if self.inserted:
             d["inserted"] = [m.to_dict() for m in self.inserted]
+        if self.view_size is not None:
+            d["view_size"] = self.view_size
         if self.trigger is not None:
             d["trigger"] = self.trigger.to_dict()
         if self.raw:
@@ -128,6 +137,7 @@ class ContextChange:
             decider=Decider(d["decider"]),
             removed_spans=tuple(tuple(s) for s in d.get("removed_spans", ())),
             inserted=tuple(Message.from_dict(m) for m in d.get("inserted", ())),
+            view_size=d.get("view_size"),
             trigger=Trigger.from_dict(trigger) if trigger else None,
             raw=d.get("raw", {}),
         )
@@ -254,18 +264,6 @@ def validate(trace: Trace) -> None:
 
     if trace.turns[0].change_before is not None:
         raise SchemaError(f"{trace.program_id}: turn 0 cannot have a change_before")
-
-    for turn in trace.turns[1:]:
-        change = turn.change_before
-        if change is None:
-            continue
-        prior = len(trace.turns[turn.index - 1].messages)
-        for start, end in change.removed_spans:
-            if end > prior:
-                raise SchemaError(
-                    f"{trace.program_id} turn {turn.index}: span ends at {end}, "
-                    f"previous turn has {prior} messages"
-                )
 
 
 def write_trace(path: Path | str, trace: Trace) -> Path:

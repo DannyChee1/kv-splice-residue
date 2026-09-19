@@ -35,6 +35,7 @@ def compaction_trace() -> Trace:
         decider=Decider.HARNESS,
         removed_spans=((1, 4),),
         inserted=(Message(role="user", content="summary of prior work"),),
+        view_size=4,
         trigger=Trigger(metric="prompt_tokens", value=118_000, threshold=100_000),
     )
     turn2 = Turn(
@@ -112,24 +113,28 @@ def test_rejects_change_on_first_turn():
         )
 
 
-def test_rejects_span_beyond_previous_turn():
-    change = ContextChange(
-        kind=ChangeKind.CLEAR, decider=Decider.HARNESS, removed_spans=((0, 5),)
-    )
-    with pytest.raises(SchemaError, match="span ends at"):
-        Trace(
-            program_id="p", harness="h", model="m",
-            turns=(
-                Turn(index=0, messages=msgs("system", "user")),
-                Turn(index=1, messages=msgs("user"), change_before=change),
-            ),
-        )
+def test_rejects_span_beyond_the_recorded_view():
+    with pytest.raises(SchemaError, match="span ends at 5, view held 4"):
+        ContextChange(kind=ChangeKind.CLEAR, decider=Decider.HARNESS,
+                      removed_spans=((0, 5),), view_size=4)
 
 
-def test_span_at_exact_previous_length_is_allowed():
-    change = ContextChange(
-        kind=ChangeKind.CLEAR, decider=Decider.HARNESS, removed_spans=((0, 2),)
-    )
+def test_span_filling_the_whole_view_is_allowed():
+    change = ContextChange(kind=ChangeKind.CLEAR, decider=Decider.HARNESS,
+                           removed_spans=((0, 4),), view_size=4)
+    assert change.removed_count == 4
+
+
+def test_span_is_unchecked_when_no_view_size_was_recorded():
+    change = ContextChange(kind=ChangeKind.CLEAR, decider=Decider.HARNESS,
+                           removed_spans=((0, 999),))
+    assert change.removed_count == 999
+
+
+def test_a_change_may_span_more_than_the_previous_prompt():
+    """The view grows past the last prompt before an edit lands."""
+    change = ContextChange(kind=ChangeKind.CLEAR, decider=Decider.HARNESS,
+                           removed_spans=((3, 4),), view_size=5)
     trace = Trace(
         program_id="p", harness="h", model="m",
         turns=(
@@ -137,7 +142,7 @@ def test_span_at_exact_previous_length_is_allowed():
             Turn(index=1, messages=msgs("user"), change_before=change),
         ),
     )
-    assert trace.changes[0][1].removed_count == 2
+    assert trace.changes[0][1].view_size == 5
 
 
 @pytest.mark.parametrize("spans", [((3, 1),), ((-1, 2),)])
