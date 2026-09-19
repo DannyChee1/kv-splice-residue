@@ -44,15 +44,53 @@ class RunnerError(RuntimeError):
     pass
 
 
+# Keyed on config.model_type, which says what the architecture is rather than
+# what somebody called the upload.
+BY_TYPE: dict[str, tuple[str, int | None, bool]] = {
+    "llama": (HALF_SPLIT, None, False),
+    "qwen2": (HALF_SPLIT, None, False),
+    "qwen3": (HALF_SPLIT, None, False),
+    "qwen3_moe": (HALF_SPLIT, None, False),
+    "mistral": (HALF_SPLIT, None, False),
+    "gemma2": (HALF_SPLIT, None, False),
+    "gemma3": (HALF_SPLIT, None, False),
+    "deepseek_v2": (HALF_SPLIT, None, True),
+    "deepseek_v3": (HALF_SPLIT, None, True),
+    "deepseek_v32": (HALF_SPLIT, None, True),
+    "kimi_k2": (HALF_SPLIT, None, True),
+}
+
+
+def preset_for_type(model_type: str) -> tuple[str, int | None, bool]:
+    """Settings for an architecture, by the name the config gives itself."""
+    try:
+        return BY_TYPE[model_type]
+    except KeyError:
+        raise RunnerError(
+            f"no RoPE preset for model_type {model_type!r}; "
+            "pass layout and rope_dim explicitly"
+        ) from None
+
+
 def preset_for(name: str) -> tuple[str, int | None, bool]:
-    """Guess layout, rotated width and MLA from a model name. Override if wrong."""
+    """Fallback guess from a repo name, for when no config is to hand.
+
+    Refuses an ambiguous name rather than letting dict order decide. A repo
+    called DeepSeek-R1-Distill-Llama-8B is a Llama, but nothing in the string
+    says so, and picking the wrong one rotates the wrong tensor.
+    """
     lowered = name.lower()
-    for key, value in PRESETS.items():
-        if key in lowered:
-            return value
-    raise RunnerError(
-        f"no RoPE preset matches {name!r}; pass layout and rope_dim explicitly"
-    )
+    hits = [key for key in PRESETS if key in lowered]
+    if not hits:
+        raise RunnerError(
+            f"no RoPE preset matches {name!r}; pass layout and rope_dim explicitly"
+        )
+    if len(hits) > 1:
+        raise RunnerError(
+            f"{name!r} matches {', '.join(sorted(hits))}; load the config and use "
+            "preset_for_type, or pass layout and rope_dim explicitly"
+        )
+    return PRESETS[hits[0]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +118,13 @@ def load(
     """Load weights. fp32 by default: bf16 storage swamps the effect we measure."""
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    guessed_layout, preset_dim, mla = preset_for(name)
+    from transformers import AutoConfig
+
+    probe = AutoConfig.from_pretrained(name, trust_remote_code=True)
+    try:
+        guessed_layout, preset_dim, mla = preset_for_type(probe.model_type)
+    except RunnerError:
+        guessed_layout, preset_dim, mla = preset_for(name)
     if layout is None:
         layout = guessed_layout
         rope_dim = preset_dim if rope_dim is None else rope_dim

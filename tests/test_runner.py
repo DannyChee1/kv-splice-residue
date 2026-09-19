@@ -303,3 +303,35 @@ def test_mla_caches_k_pe_half_split_whatever_rope_interleave_says():
 
 def test_the_mla_preset_picks_half_split():
     assert preset_for("moonshotai/Moonlight-16B-A3B")[0] == HALF_SPLIT
+
+
+# --- resolving a model to its settings -------------------------------------
+
+
+@pytest.mark.parametrize("model_type,mla", [
+    ("llama", False), ("qwen3", False), ("qwen3_moe", False),
+    ("deepseek_v2", True), ("deepseek_v3", True), ("kimi_k2", True),
+])
+def test_model_type_decides_mla(model_type, mla):
+    from scm.runner import preset_for_type
+    assert preset_for_type(model_type)[2] is mla
+
+
+def test_an_unknown_model_type_refuses():
+    from scm.runner import preset_for_type
+    with pytest.raises(RunnerError, match="no RoPE preset for model_type"):
+        preset_for_type("brand_new_arch")
+
+
+def test_an_ambiguous_repo_name_refuses_rather_than_guessing():
+    """DeepSeek-R1-Distill-Llama is a Llama, and the string does not say so."""
+    with pytest.raises(RunnerError, match="matches deepseek, llama"):
+        preset_for("deepseek-ai/DeepSeek-R1-Distill-Llama-8B")
+
+
+def test_every_type_preset_is_well_formed():
+    from scm.runner import BY_TYPE
+    for layout, rope_dim, mla in BY_TYPE.values():
+        assert layout in ("interleaved", "half_split")
+        assert rope_dim is None or rope_dim > 0
+        assert isinstance(mla, bool)
