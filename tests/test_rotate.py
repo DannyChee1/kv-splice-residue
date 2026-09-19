@@ -182,3 +182,42 @@ def test_relative_l2_rejects_an_all_zero_reference():
 def test_dtype_survives_a_rotation():
     k = apply_rope(keys(), at(*range(8)), INTERLEAVED).to(torch.bfloat16)
     assert rotate(k, -10, INTERLEAVED).dtype is torch.bfloat16
+
+
+# --- explicit frequencies --------------------------------------------------
+
+
+def test_explicit_freqs_reproduce_the_default():
+    k = apply_rope(keys(), at(*range(8)), INTERLEAVED)
+    from scm.rotate import inv_freq as default_freqs
+    assert torch.equal(
+        rotate(k, -40, INTERLEAVED, freqs=default_freqs(DIM)),
+        rotate(k, -40, INTERLEAVED),
+    )
+
+
+def test_scaled_freqs_rotate_differently():
+    """A YaRN ladder is not the plain one, so the rotation must differ."""
+    from scm.rotate import inv_freq as default_freqs
+    k = apply_rope(keys(), at(*range(8)), INTERLEAVED)
+    bent = default_freqs(DIM) * 0.84
+    assert relative_l2(rotate(k, -40, INTERLEAVED, freqs=bent),
+                       rotate(k, -40, INTERLEAVED)) > 0.01
+
+
+def test_the_wrong_number_of_freqs_is_rejected():
+    with pytest.raises(ValueError, match="frequencies for a 64-wide key"):
+        rotate(keys(), -1, INTERLEAVED, freqs=torch.ones(64))
+
+
+def test_the_contract_holds_under_a_bent_ladder():
+    """Rotation still lands where a prefill would, whatever the ladder."""
+    from scm.rotate import inv_freq as default_freqs
+    bent = default_freqs(DIM) * 0.84
+    raw, start, delta = keys(), at(*range(100, 108)), -46
+    angle_start = start.float()[:, None] * bent
+    angle_end = (start + delta).float()[:, None] * bent
+    from scm.rotate import _spin
+    placed = _spin(raw, angle_start, INTERLEAVED)
+    honest = _spin(raw, angle_end, INTERLEAVED)
+    assert relative_l2(rotate(placed, delta, INTERLEAVED, freqs=bent), honest) < 1e-6

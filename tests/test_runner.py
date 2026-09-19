@@ -178,10 +178,10 @@ def test_a_span_reaching_the_end_of_the_prompt_is_rejected(target):
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("meta-llama/Llama-3.1-8B", (HALF_SPLIT, None)),
-    ("Qwen/Qwen3-4B", (HALF_SPLIT, None)),
-    ("deepseek-ai/DeepSeek-V2-Lite", ("interleaved", 64)),
-    ("moonshotai/Moonlight-16B-A3B", ("interleaved", 64)),
+    ("meta-llama/Llama-3.1-8B", (HALF_SPLIT, None, False)),
+    ("Qwen/Qwen3-4B", (HALF_SPLIT, None, False)),
+    ("deepseek-ai/DeepSeek-V2-Lite", (HALF_SPLIT, None, True)),
+    ("moonshotai/Moonlight-16B-A3B", (HALF_SPLIT, None, True)),
 ])
 def test_presets_match_known_models(name, expected):
     assert preset_for(name) == expected
@@ -193,9 +193,27 @@ def test_an_unknown_model_refuses_to_guess():
 
 
 def test_every_preset_names_a_real_layout():
-    for layout, rope_dim in PRESETS.values():
+    for layout, rope_dim, mla in PRESETS.values():
         assert layout in ("interleaved", "half_split")
         assert rope_dim is None or rope_dim > 0
+        assert isinstance(mla, bool)
+
+
+def test_only_mla_models_are_flagged_as_mla():
+    assert preset_for("deepseek-ai/DeepSeek-V2-Lite")[2] is True
+    assert preset_for("meta-llama/Llama-3.1-8B")[2] is False
+
+
+def test_model_freqs_reads_the_ladder_off_the_model(target):
+    from scm.runner import model_freqs
+    freqs = model_freqs(target.model)
+    assert freqs is not None and freqs.ndim >= 1
+
+
+def test_model_freqs_trims_to_the_rope_width(target):
+    from scm.runner import model_freqs
+    trimmed = model_freqs(target.model, width=8)
+    assert trimmed.shape[-1] == 4
 
 
 # --- rope base -------------------------------------------------------------
@@ -232,3 +250,56 @@ def test_rope_base_refuses_rather_than_guessing():
 
     with pytest.raises(RunnerError, match="cannot find the RoPE base"):
         rope_base(Config())
+
+
+def test_mla_caches_k_pe_half_split_whatever_rope_interleave_says():
+    """rope_interleave is about weight layout, not what lands in the cache.
+
+    DeepSeek's interleaved path reorders its input and emits output identical to
+    the rotate_half form. Trusting the flag rotates k_pe the wrong way and the
+    error goes from 1e-7 to 0.9, which looks like a finding rather than a bug.
+    """
+    from transformers import DeepseekV3Config, DeepseekV3ForCausalLM
+
+    from scm.rotate import INTERLEAVED, relative_l2
+    from scm.runner import model_freqs, rope_base, rope_width
+    from scm.splice import splice_cache
+
+    cfg = DeepseekV3Config(
+        vocab_size=128, hidden_size=128, intermediate_size=256,
+        num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=4,
+        kv_lora_rank=32, q_lora_rank=64, qk_nope_head_dim=16,
+        qk_rope_head_dim=16, v_head_dim=16, max_position_embeddings=512,
+        first_k_dense_replace=8, n_routed_experts=4, n_shared_experts=1,
+        num_experts_per_tok=2,
+    )
+    assert getattr(cfg, "rope_interleave", False) is True
+
+    torch.manual_seed(0)
+    model = DeepseekV3ForCausalLM(cfg).eval()
+    tok = CharTokenizer()
+    prefix, span = "the quick brown fox ", "jumps over the lazy dog "
+    full = prefix + span + "and then it rests quietly"
+    start, end = len(tok.encode(prefix)), len(tok.encode(prefix + span))
+
+    def error(layout):
+        t = Target(model, tok, layout, None, rope_base(cfg), True,
+                   model_freqs(model, rope_width(cfg)))
+        spliced = splice_cache(
+            read_cache(prefill(t, tok.encode(full))), start, end,
+            t.layout, None, t.base, True, t.freqs,
+        )
+        honest = read_cache(prefill(t, tok.encode(prefix + "and then it rests quietly")))
+        return (relative_l2(spliced[0].values, honest[0].values),
+                relative_l2(spliced[0].keys, honest[0].keys))
+
+    k_pe_half, latent_half = error(HALF_SPLIT)
+    k_pe_inter, _ = error(INTERLEAVED)
+
+    assert k_pe_half < 1e-5, "half_split is what the cache holds"
+    assert k_pe_inter > 0.1, "believing rope_interleave breaks the rotation"
+    assert latent_half == 0.0, "the latent is position-free, so it must match exactly"
+
+
+def test_the_mla_preset_picks_half_split():
+    assert preset_for("moonshotai/Moonlight-16B-A3B")[0] == HALF_SPLIT

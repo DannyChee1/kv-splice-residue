@@ -27,15 +27,16 @@ from scm.probes import Probe, check_edit, token_span
 from scm.rotate import HALF_SPLIT, INTERLEAVED
 from scm.splice import Layer, splice_cache
 
-# Most open models rotate the whole key NeoX-style; MLA keeps a position-free
-# head and rotates only a trailing slice.
-PRESETS: dict[str, tuple[str, int | None]] = {
-    "llama": (HALF_SPLIT, None),
-    "qwen": (HALF_SPLIT, None),
-    "mistral": (HALF_SPLIT, None),
-    "gemma": (HALF_SPLIT, None),
-    "deepseek": (INTERLEAVED, 64),
-    "moonlight": (INTERLEAVED, 64),
+# Ordinary attention caches keys and values and rotates the whole key. MLA
+# caches neither: the keys slot holds the compressed latent and the values slot
+# holds k_pe, so `mla` says which tensor the rotation belongs on.
+PRESETS: dict[str, tuple[str, int | None, bool]] = {
+    "llama": (HALF_SPLIT, None, False),
+    "qwen": (HALF_SPLIT, None, False),
+    "mistral": (HALF_SPLIT, None, False),
+    "gemma": (HALF_SPLIT, None, False),
+    "deepseek": (HALF_SPLIT, None, True),
+    "moonlight": (HALF_SPLIT, None, True),
 }
 
 
@@ -43,8 +44,8 @@ class RunnerError(RuntimeError):
     pass
 
 
-def preset_for(name: str) -> tuple[str, int | None]:
-    """Guess layout and rotated width from a model name. Override if it guesses wrong."""
+def preset_for(name: str) -> tuple[str, int | None, bool]:
+    """Guess layout, rotated width and MLA from a model name. Override if wrong."""
     lowered = name.lower()
     for key, value in PRESETS.items():
         if key in lowered:
@@ -61,6 +62,8 @@ class Target:
     layout: str = HALF_SPLIT
     rope_dim: int | None = None
     base: float = 10000.0
+    mla: bool = False
+    freqs: object = None
 
     @property
     def device(self):
@@ -77,8 +80,9 @@ def load(
     """Load weights. fp32 by default: bf16 storage swamps the effect we measure."""
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    guessed_layout, preset_dim, mla = preset_for(name)
     if layout is None:
-        layout, preset_dim = preset_for(name)
+        layout = guessed_layout
         rope_dim = preset_dim if rope_dim is None else rope_dim
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -86,7 +90,36 @@ def load(
     ).to(device)
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=True)
-    return Target(model, tokenizer, layout, rope_dim, rope_base(model.config))
+
+    # Do not read config.rope_interleave here. It describes how the weights are
+    # laid out, not the cache: DeepSeek's interleaved path reorders its input and
+    # emits output bit-identical to the rotate_half form, so what lands in the
+    # cache is half-split either way. Measured, not assumed; see the test.
+
+    width = rope_width(model.config) if mla else None
+    return Target(model, tokenizer, layout, rope_dim,
+                  rope_base(model.config), mla, model_freqs(model, width))
+
+
+def rope_width(config) -> int | None:
+    return getattr(config, "qk_rope_head_dim", None)
+
+
+def model_freqs(model, width: int | None = None):
+    """Take the model's own inv_freq rather than rebuilding it from a base.
+
+    YaRN and the other scalings bend the frequency ladder, so a ladder rebuilt
+    from `base` rotates by the wrong angle and every number downstream is quietly
+    wrong. DeepSeek-V2-Lite is a yarn model, so this is not hypothetical.
+    """
+    for module in model.modules():
+        freqs = getattr(module, "inv_freq", None)
+        if freqs is None:
+            continue
+        if width is not None and freqs.shape[-1] != width // 2:
+            freqs = freqs[..., : width // 2]
+        return freqs.detach()
+    return None
 
 
 def rope_base(config) -> float:
@@ -189,6 +222,7 @@ def run_probe(target: Target, probe: Probe, steps: int = 128) -> Trial:
         splice_cache(
             read_cache(full_cache), start, end,
             target.layout, target.rope_dim, target.base,
+            target.mla, target.freqs,
         )
     )
     return Trial(
@@ -211,6 +245,7 @@ def layer_zero_error(target: Target, probe: Probe) -> float:
     spliced = splice_cache(
         read_cache(prefill(target, target.tokenizer.encode(probe.full))),
         start, end, target.layout, target.rope_dim, target.base,
+        target.mla, target.freqs,
     )[0]
     honest = read_cache(prefill(target, target.tokenizer.encode(probe.edited)))[0]
     return relative_l2(spliced.keys, honest.keys)

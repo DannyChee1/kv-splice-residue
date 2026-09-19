@@ -174,3 +174,79 @@ def test_dtype_survives_the_splice():
     out = splice_layer(la, 4, 7)
     assert out.keys.dtype is torch.bfloat16
     assert out.values.dtype is torch.bfloat16
+
+
+# --- MLA: the cache slots do not mean what they are named ------------------
+
+
+def mla_layer(seq: int = SEQ, lora: int = 32, rope: int = 16) -> Layer:
+    """Keys hold the compressed latent; values hold k_pe. As HuggingFace does."""
+    latent = torch.randn(1, 1, seq, lora, generator=torch.manual_seed(2))
+    k_pe = apply_rope(
+        torch.randn(1, 1, seq, rope, generator=torch.manual_seed(3)),
+        torch.arange(seq), INTERLEAVED,
+    )
+    return Layer(keys=latent, values=k_pe)
+
+
+def test_mla_rotates_the_values_slot_because_that_is_k_pe():
+    la = mla_layer()
+    out = splice_layer(la, 4, 7, mla=True)
+    assert torch.equal(out.values[..., 4:, :], rotate(la.values[..., 7:, :], -3))
+
+
+def test_mla_leaves_the_latent_alone():
+    """Position-free by construction, so no rotation could repair it."""
+    la = mla_layer()
+    out = splice_layer(la, 4, 7, mla=True)
+    assert torch.equal(out.keys[..., 4:, :], la.keys[..., 7:, :])
+    assert torch.equal(out.keys[..., :4, :], la.keys[..., :4, :])
+
+
+def test_mla_re_anchors_k_pe_where_a_prefill_would():
+    raw = torch.randn(1, 1, SEQ, 16, generator=torch.manual_seed(3))
+    la = Layer(keys=torch.randn(1, 1, SEQ, 32), 
+               values=apply_rope(raw, torch.arange(SEQ), INTERLEAVED))
+    out = splice_layer(la, 4, 7, mla=True)
+    kept = torch.cat((raw[..., :4, :], raw[..., 7:, :]), dim=-2)
+    honest = apply_rope(kept, torch.arange(SEQ - 3), INTERLEAVED)
+    assert relative_l2(out.values, honest) < 1e-5
+
+
+def test_mla_and_ordinary_mode_disagree():
+    """Running MLA through the ordinary path rotates the wrong tensor."""
+    la = mla_layer()
+    ordinary = splice_layer(la, 4, 7, mla=False)
+    mla = splice_layer(la, 4, 7, mla=True)
+    assert not torch.allclose(ordinary.keys, mla.keys)
+    assert not torch.allclose(ordinary.values, mla.values)
+
+
+def test_mla_shortens_both_slots():
+    out = splice_layer(mla_layer(), 4, 7, mla=True)
+    assert out.keys.shape[-2] == SEQ - 3
+    assert out.values.shape[-2] == SEQ - 3
+
+
+def test_mla_carries_explicit_freqs_through():
+    from scm.rotate import inv_freq
+    la = mla_layer()
+    bent = inv_freq(16) * 0.84
+    assert not torch.allclose(
+        splice_layer(la, 4, 7, mla=True, freqs=bent).values,
+        splice_layer(la, 4, 7, mla=True).values,
+    )
+
+
+def test_ordinary_mode_carries_explicit_freqs_through():
+    from scm.rotate import inv_freq
+    keys = placed()
+    assert not torch.allclose(
+        splice_keys(keys, 4, 7, freqs=inv_freq(DIM) * 0.84),
+        splice_keys(keys, 4, 7),
+    )
+
+
+def test_a_layer_may_hold_differently_shaped_slots():
+    """MLA's latent is 512 wide and k_pe is 64; only the seq lengths must agree."""
+    assert mla_layer().length == SEQ

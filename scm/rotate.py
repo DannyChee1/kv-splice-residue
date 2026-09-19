@@ -83,15 +83,26 @@ def rotate(
     delta: int,
     layout: str = INTERLEAVED,
     base: float = 10000.0,
+    freqs: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Re-anchor already-placed keys by delta positions.
 
     One angle for the whole tensor, since R(delta) does not depend on where the
     key started. Negative delta moves keys earlier, which is the deletion case.
+
+    `freqs` overrides the frequencies, and real models nearly always need it.
+    YaRN and the other scalings bend the frequency ladder away from
+    `1 / base ** (2i/d)`, so recomputing from a base silently rotates by the
+    wrong angle. Hand in the model's own inv_freq and the question goes away.
     """
     _check(x.shape[-1], layout)
-    angle = float(delta) * inv_freq(x.shape[-1], base, x.device)
-    return _spin(x, angle, layout)
+    if freqs is None:
+        freqs = inv_freq(x.shape[-1], base, x.device)
+    elif freqs.shape[-1] != x.shape[-1] // 2:
+        raise ValueError(
+            f"got {freqs.shape[-1]} frequencies for a {x.shape[-1]}-wide key"
+        )
+    return _spin(x, float(delta) * freqs.to(x.device), layout)
 
 
 def relative_l2(actual: torch.Tensor, expected: torch.Tensor) -> float:

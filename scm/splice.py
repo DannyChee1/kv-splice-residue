@@ -48,6 +48,7 @@ def splice_keys(
     layout: str = INTERLEAVED,
     rope_dim: int | None = None,
     base: float = 10000.0,
+    freqs: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Drop keys [start, end) and re-anchor the rest by the shift.
 
@@ -62,14 +63,16 @@ def splice_keys(
     head = keys[..., :start, :]
     tail = keys[..., end:, :]
     if rope_dim is None:
-        tail = rotate(tail, delta, layout, base)
+        tail = rotate(tail, delta, layout, base, freqs)
     else:
         if not 0 < rope_dim <= keys.shape[-1]:
             raise SpliceError(
                 f"rope_dim {rope_dim} does not fit a key of {keys.shape[-1]}"
             )
         plain, spun = tail[..., :-rope_dim], tail[..., -rope_dim:]
-        tail = torch.cat((plain, rotate(spun, delta, layout, base)), dim=-1)
+        tail = torch.cat(
+            (plain, rotate(spun, delta, layout, base, freqs)), dim=-1
+        )
     return torch.cat((head, tail), dim=SEQ)
 
 
@@ -104,9 +107,29 @@ def splice_layer(
     layout: str = INTERLEAVED,
     rope_dim: int | None = None,
     base: float = 10000.0,
+    mla: bool = False,
+    freqs: torch.Tensor | None = None,
 ) -> Layer:
+    """Cut a span from one layer.
+
+    `mla` swaps which tensor gets rotated. HuggingFace's MLA does not cache keys
+    and values at all: the `keys` slot holds the compressed KV latent and the
+    `values` slot holds k_pe, the only part RoPE ever touched. So the rotation
+    belongs on `values`, whole, and the latent is carried across untouched.
+
+    That makes the leftover starker than on ordinary attention. The latent is
+    position-free by construction, so no rotation could repair it even in
+    principle, and it holds everything the model took from the span being cut.
+    """
+    if mla:
+        return Layer(
+            keys=splice_values(layer.keys, start, end),
+            values=splice_keys(
+                layer.values, start, end, layout, None, base, freqs
+            ),
+        )
     return Layer(
-        keys=splice_keys(layer.keys, start, end, layout, rope_dim, base),
+        keys=splice_keys(layer.keys, start, end, layout, rope_dim, base, freqs),
         values=splice_values(layer.values, start, end),
     )
 
@@ -118,6 +141,8 @@ def splice_cache(
     layout: str = INTERLEAVED,
     rope_dim: int | None = None,
     base: float = 10000.0,
+    mla: bool = False,
+    freqs: torch.Tensor | None = None,
 ) -> list[Layer]:
     """Apply the same cut to every layer. One directive, one span, whole stack."""
     if not cache:
@@ -125,4 +150,7 @@ def splice_cache(
     lengths = {layer.length for layer in cache}
     if len(lengths) != 1:
         raise SpliceError(f"layers disagree on length: {sorted(lengths)}")
-    return [splice_layer(la, start, end, layout, rope_dim, base) for la in cache]
+    return [
+        splice_layer(la, start, end, layout, rope_dim, base, mla, freqs)
+        for la in cache
+    ]
