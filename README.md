@@ -46,5 +46,3 @@ negative. The splice forgets about as well as a re-prefill.
 | Continuum (2511.02230) | TTL retention of caches that already exist |
 | An Internet for the KV Cache (2608.01526) | CDN-style placement and prefetch |
 | CXL-SpecKV (2512.11920) | predicted prefetch across a memory tier, read-only |
-
-298 tests, every decision point mutation-checked.
