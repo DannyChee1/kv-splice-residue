@@ -128,3 +128,38 @@ def test_a_layer_that_never_settles_means_no_stopping_point():
 def test_a_looser_epsilon_never_lengthens_the_shadow():
     curves = [Decay(layer=0, distances=(0.5, 0.2, 0.05, 0.005))]
     assert shadow_length(curves, 0.1) <= shadow_length(curves, 0.01)
+
+
+# --- compare, for caches of different lengths ------------------------------
+
+
+def test_compare_lines_up_two_offsets():
+    """The token at `end` before a cut is the token at `start` after it."""
+    from scm.divergence import compare
+    long_side = layer([0, 0, 0, 0, 5], seq=5)
+    short_side = flat(3)
+    curves = compare([long_side], [short_side], left_from=2, right_from=0)
+    assert len(curves[0].distances) == 3
+    assert curves[0].distances[0] == 0.0
+    assert curves[0].distances[2] > 0
+
+
+def test_compare_stops_at_the_shorter_side():
+    from scm.divergence import compare
+    curves = compare([flat(10)], [flat(4)], left_from=6, right_from=0)
+    assert len(curves[0].distances) == 4
+
+
+def test_compare_rejects_an_offset_past_the_end():
+    from scm.divergence import compare
+    with pytest.raises(ValueError, match="left offset 9"):
+        compare([flat(4)], [flat(4)], left_from=9, right_from=0)
+    with pytest.raises(ValueError, match="right offset 9"):
+        compare([flat(4)], [flat(4)], left_from=0, right_from=9)
+
+
+def test_decay_is_compare_with_one_offset():
+    from scm.divergence import compare
+    spliced, honest = [layer([0, 0, 3, 4])], [flat(4)]
+    assert decay(spliced, honest, cut_at=1)[0].distances == \
+        compare(spliced, honest, 1, 1)[0].distances

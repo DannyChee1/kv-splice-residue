@@ -52,27 +52,58 @@ def _distances(a: torch.Tensor, b: torch.Tensor, start: int) -> tuple[float, ...
     return tuple(out)
 
 
+def compare(
+    left: list[Layer],
+    right: list[Layer],
+    left_from: int,
+    right_from: int,
+    use_values: bool = True,
+) -> list[Decay]:
+    """Gap per layer between two caches, walking each from its own offset.
+
+    The offsets exist so an unedited cache can be lined up against an edited one.
+    The token sitting at `end` before the cut sits at `start` after it, so the
+    same content is compared even though the two caches are different lengths.
+    """
+    if len(left) != len(right):
+        raise ValueError(f"{len(left)} left layers, {len(right)} right")
+    if not left:
+        raise ValueError("no layers to compare")
+    for label, stack, offset in (("left", left, left_from), ("right", right, right_from)):
+        if not 0 <= offset <= stack[0].length:
+            raise ValueError(
+                f"{label} offset {offset} but the cache holds {stack[0].length}"
+            )
+
+    out = []
+    for index, (a, b) in enumerate(zip(left, right)):
+        first = a.values if use_values else a.keys
+        second = b.values if use_values else b.keys
+        span = min(first.shape[-2] - left_from, second.shape[-2] - right_from)
+        gaps = tuple(
+            relative_l2(first[..., left_from + i, :], second[..., right_from + i, :])
+            for i in range(span)
+        )
+        out.append(Decay(layer=index, distances=gaps))
+    return out
+
+
 def decay(
     spliced: list[Layer], honest: list[Layer], cut_at: int, use_values: bool = True
 ) -> list[Decay]:
-    """Gap per layer from the cut onward. Values by default, since keys get fixed."""
+    """Gap per layer from the cut onward, between caches of the same length."""
     if len(spliced) != len(honest):
         raise ValueError(f"{len(spliced)} spliced layers, {len(honest)} honest")
     if not spliced:
         raise ValueError("no layers to compare")
     if not 0 <= cut_at <= spliced[0].length:
         raise ValueError(f"cut at {cut_at} but the cache holds {spliced[0].length}")
-
-    out = []
     for index, (cut, ref) in enumerate(zip(spliced, honest)):
         if cut.length != ref.length:
             raise ValueError(
                 f"layer {index}: {cut.length} spliced entries, {ref.length} honest"
             )
-        left = cut.values if use_values else cut.keys
-        right = ref.values if use_values else ref.keys
-        out.append(Decay(layer=index, distances=_distances(left, right, cut_at)))
-    return out
+    return compare(spliced, honest, cut_at, cut_at, use_values)
 
 
 def shadow_length(decays: list[Decay], epsilon: float) -> int | None:

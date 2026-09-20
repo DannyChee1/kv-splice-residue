@@ -114,13 +114,21 @@ def load(
     device: str = "cpu",
     layout: str | None = None,
     rope_dim: int | None = None,
+    remote_code: bool = False,
 ) -> Target:
-    """Load weights. fp32 by default: bf16 storage swamps the effect we measure."""
+    """Load weights, preferring the implementation that ships with transformers.
+
+    `remote_code` stays off on purpose. A repo's own modeling file is written
+    against whatever transformers existed when it was uploaded, and more to the
+    point, everything we know about the MLA cache layout was measured against
+    the native classes. Custom code could cache differently and the splice would
+    be wrong without saying so.
+    """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from transformers import AutoConfig
 
-    probe = AutoConfig.from_pretrained(name, trust_remote_code=True)
+    probe = AutoConfig.from_pretrained(name, trust_remote_code=remote_code)
     try:
         guessed_layout, preset_dim, mla = preset_for_type(probe.model_type)
     except RunnerError:
@@ -129,11 +137,17 @@ def load(
         layout = guessed_layout
         rope_dim = preset_dim if rope_dim is None else rope_dim
 
-    model = AutoModelForCausalLM.from_pretrained(
-        name, dtype=getattr(torch, dtype), trust_remote_code=True
-    ).to(device)
+    # device_map streams shards straight onto the GPU. Loading to CPU and then
+    # calling .to() needs the whole model in RAM first, which stalls a 30GB load
+    # on a box sized for the weights alone.
+    kwargs = {"dtype": getattr(torch, dtype), "trust_remote_code": remote_code}
+    if device != "cpu":
+        kwargs["device_map"] = device
+    model = AutoModelForCausalLM.from_pretrained(name, **kwargs)
+    if device == "cpu":
+        model = model.to(device)
     model.eval()
-    tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=remote_code)
 
     # Do not read config.rope_interleave here. It describes how the weights are
     # laid out, not the cache: DeepSeek's interleaved path reorders its input and
@@ -293,3 +307,69 @@ def layer_zero_error(target: Target, probe: Probe) -> float:
     )[0]
     honest = read_cache(prefill(target, target.tokenizer.encode(probe.edited)))[0]
     return relative_l2(spliced.keys, honest.keys)
+
+
+def score_answer(target: Target, past, first_token: int, answer_ids: list[int]) -> float:
+    """Teacher-force an answer through a cache and report its mean log-probability.
+
+    Sensitive where an argmax is not: a leftover that lifts the answer from
+    unlikely to plausible shows up here even when it never wins the argmax.
+    """
+    from scm.recall import mean_logprob
+
+    if not answer_ids:
+        raise RunnerError("no answer tokens to score")
+    ids = torch.tensor([[first_token, *answer_ids[:-1]]], device=target.device)
+    offset = read_cache(past)[0].length
+    out = _forward(target, ids, past, offset)
+    return mean_logprob(
+        out.logits[0], torch.tensor(answer_ids, device=out.logits.device)
+    )
+
+
+def run_recall(target: Target, probe, steps: int = 0) -> dict:
+    """Score one recall probe three ways and report what the splice kept."""
+    from scm.recall import Score, span_tokens
+
+    start, end = span_tokens(probe, target.tokenizer)
+    full_ids = target.tokenizer.encode(probe.full)
+    edited_ids = target.tokenizer.encode(probe.edited)
+    answer_ids = target.tokenizer.encode(probe.answer, add_special_tokens=False)
+    if not answer_ids:
+        raise RunnerError(f"{probe.name}: answer tokenizes to nothing")
+
+    full_cache = prefill(target, full_ids)
+    spliced = write_cache(
+        splice_cache(read_cache(full_cache), start, end, target.layout,
+                     target.rope_dim, target.base, target.mla, target.freqs)
+    )
+    last = full_ids[-1]
+    score = Score(
+        full=score_answer(target, full_cache, last, answer_ids),
+        reprefill=score_answer(target, prefill(target, edited_ids), last, answer_ids),
+        spliced=score_answer(target, spliced, last, answer_ids),
+    )
+    return {
+        "probe": probe.name,
+        "prompt_tokens": len(full_ids),
+        "answer_tokens": len(answer_ids),
+        "full": score.full,
+        "reprefill": score.reprefill,
+        "spliced": score.spliced,
+        "fact_helped": score.full - score.reprefill,
+        "recoverable": score.recoverable if score.full > score.reprefill else None,
+        "layer0_error": layer_zero_error_ids(target, full_ids, edited_ids, start, end),
+    }
+
+
+def layer_zero_error_ids(target: Target, full_ids, edited_ids, start, end) -> float:
+    from scm.rotate import relative_l2
+
+    spliced = splice_cache(
+        read_cache(prefill(target, full_ids)), start, end, target.layout,
+        target.rope_dim, target.base, target.mla, target.freqs,
+    )[0]
+    honest = read_cache(prefill(target, edited_ids))[0]
+    left = spliced.keys if target.mla else spliced.values
+    right = honest.keys if target.mla else honest.values
+    return relative_l2(left[..., :start, :], right[..., :start, :])

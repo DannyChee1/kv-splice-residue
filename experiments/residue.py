@@ -33,10 +33,13 @@ def main() -> None:
     ap.add_argument("--padding", type=int, nargs="+", default=[0, 10, 40])
     ap.add_argument("--layout", default=None)
     ap.add_argument("--rope-dim", type=int, default=None)
+    ap.add_argument("--remote-code", action="store_true",
+                    help="use the repo's own modeling file; off by default")
     ap.add_argument("--out", type=Path, default=Path("results/residue.json"))
     args = ap.parse_args()
 
-    target = load(args.model, args.dtype, args.device, args.layout, args.rope_dim)
+    target = load(args.model, args.dtype, args.device, args.layout,
+                  args.rope_dim, args.remote_code)
 
     rows, trials = [], []
     for depth in args.padding:
