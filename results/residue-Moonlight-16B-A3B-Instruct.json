@@ -1,0 +1,359 @@
+{
+  "model": "moonshotai/Moonlight-16B-A3B-Instruct",
+  "dtype": "bfloat16",
+  "steps": 128,
+  "trials": 20,
+  "informative": 14,
+  "verdicts": {
+    "reprefill": 7,
+    "neither": 4,
+    "full": 3
+  },
+  "mean_prefix": {
+    "full": 10.0,
+    "reprefill": 18.285714285714285
+  },
+  "tracks_reprefill": 0.5,
+  "rows": [
+    {
+      "probe": "retracted-price",
+      "harm": "retained",
+      "padding": 0,
+      "prompt_tokens": 26,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 3
+      },
+      "kl": {
+        "full": 0.18498119711875916,
+        "reprefill": 0.3168971836566925
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "injected-instruction",
+      "harm": "retained",
+      "padding": 0,
+      "prompt_tokens": 30,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 4
+      },
+      "kl": {
+        "full": 1.3111112117767334,
+        "reprefill": 0.4417635500431061
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "leaked-credential",
+      "harm": "retained",
+      "padding": 0,
+      "prompt_tokens": 34,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 2,
+        "reprefill": 2
+      },
+      "kl": {
+        "full": 0.08360083401203156,
+        "reprefill": 0.7730100750923157
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "superseded-tool-error",
+      "harm": "retained",
+      "padding": 0,
+      "prompt_tokens": 22,
+      "diverged": true,
+      "verdict": "neither",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 0.6510363817214966,
+        "reprefill": 0.356389582157135
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "needed-calculation",
+      "harm": "erased",
+      "padding": 0,
+      "prompt_tokens": 20,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 8
+      },
+      "kl": {
+        "full": 0.7845179438591003,
+        "reprefill": 0.2411910593509674
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "retracted-price",
+      "harm": "retained",
+      "padding": 10,
+      "prompt_tokens": 845,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 52,
+        "reprefill": 1
+      },
+      "kl": {
+        "full": 0.06647507846355438,
+        "reprefill": 0.3519619107246399
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "injected-instruction",
+      "harm": "retained",
+      "padding": 10,
+      "prompt_tokens": 849,
+      "diverged": true,
+      "verdict": "neither",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 3.7829489707946777,
+        "reprefill": 0.2661276161670685
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "leaked-credential",
+      "harm": "retained",
+      "padding": 10,
+      "prompt_tokens": 853,
+      "diverged": true,
+      "verdict": "full",
+      "prefix_lengths": {
+        "full": 128,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 0.21609674394130707,
+        "reprefill": 0.22580894827842712
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "superseded-tool-error",
+      "harm": "retained",
+      "padding": 10,
+      "prompt_tokens": 841,
+      "diverged": true,
+      "verdict": "full",
+      "prefix_lengths": {
+        "full": 2,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 0.05131068080663681,
+        "reprefill": 0.04260458052158356
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "needed-calculation",
+      "harm": "erased",
+      "padding": 10,
+      "prompt_tokens": 839,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 73
+      },
+      "kl": {
+        "full": 1.5846819877624512,
+        "reprefill": 0.24042129516601562
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "retracted-price",
+      "harm": "retained",
+      "padding": 40,
+      "prompt_tokens": 3237,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 128,
+        "reprefill": 1
+      },
+      "kl": {
+        "full": 0.0727706030011177,
+        "reprefill": 0.23139584064483643
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "injected-instruction",
+      "harm": "retained",
+      "padding": 40,
+      "prompt_tokens": 3241,
+      "diverged": true,
+      "verdict": "neither",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 6.388611793518066,
+        "reprefill": 0.6570789813995361
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "leaked-credential",
+      "harm": "retained",
+      "padding": 40,
+      "prompt_tokens": 3245,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 6
+      },
+      "kl": {
+        "full": 0.5277131199836731,
+        "reprefill": 0.16560737788677216
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "superseded-tool-error",
+      "harm": "retained",
+      "padding": 40,
+      "prompt_tokens": 3233,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 4,
+        "reprefill": 128
+      },
+      "kl": {
+        "full": 0.047858405858278275,
+        "reprefill": 0.07928141951560974
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "needed-calculation",
+      "harm": "erased",
+      "padding": 40,
+      "prompt_tokens": 3231,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 34
+      },
+      "kl": {
+        "full": 2.360973596572876,
+        "reprefill": 0.15050794184207916
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "retracted-price",
+      "harm": "retained",
+      "padding": 80,
+      "prompt_tokens": 6443,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 112,
+        "reprefill": 1
+      },
+      "kl": {
+        "full": 0.03828677907586098,
+        "reprefill": 0.054957397282123566
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "injected-instruction",
+      "harm": "retained",
+      "padding": 80,
+      "prompt_tokens": 6447,
+      "diverged": true,
+      "verdict": "reprefill",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 128
+      },
+      "kl": {
+        "full": 4.251662731170654,
+        "reprefill": 0.5823693871498108
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "leaked-credential",
+      "harm": "retained",
+      "padding": 80,
+      "prompt_tokens": 6451,
+      "diverged": true,
+      "verdict": "neither",
+      "prefix_lengths": {
+        "full": 0,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 0.7587535977363586,
+        "reprefill": 0.22756800055503845
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "superseded-tool-error",
+      "harm": "retained",
+      "padding": 80,
+      "prompt_tokens": 6439,
+      "diverged": true,
+      "verdict": "full",
+      "prefix_lengths": {
+        "full": 10,
+        "reprefill": 0
+      },
+      "kl": {
+        "full": 0.11223769187927246,
+        "reprefill": 0.18390928208827972
+      },
+      "layer0_error": 0.0
+    },
+    {
+      "probe": "needed-calculation",
+      "harm": "erased",
+      "padding": 80,
+      "prompt_tokens": 6437,
+      "diverged": false,
+      "verdict": "both",
+      "prefix_lengths": {
+        "full": 16,
+        "reprefill": 1
+      },
+      "kl": {
+        "full": 0.8335463404655457,
+        "reprefill": 0.02692931331694126
+      },
+      "layer0_error": 0.0
+    }
+  ]
+}
