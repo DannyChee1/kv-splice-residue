@@ -1,14 +1,7 @@
-"""Gate 3: how far past a deletion does its influence reach?
+"""Per-position gap between a spliced cache and an honest one.
 
-Prefill a prompt, cut a span out of the cache, and compare each layer against an
-honest reprefill position by position. The gap at position i tells you whether a
-shadow track still has to run there, or whether the main track's entries would
-already do.
-
-A shadow only needs to run while the two differ. Both tracks see the same tokens,
-so the difference is measurable rather than assumed, which is what gives SCM a
-stopping rule instead of a guess. At epsilon = 0 the cache is exact; above it the
-shadow stops once the gap stays under epsilon, with an error you measured.
+A shadow track only needs to run while the two differ, so this is what a
+stopping rule would be built on.
 """
 
 from __future__ import annotations
@@ -23,16 +16,13 @@ from scm.splice import Layer
 
 @dataclass(frozen=True, slots=True)
 class Decay:
-    """Per-position gap between a spliced cache and an honest one, one layer."""
+    """Per-position gap for one layer, from the cut onward."""
 
     layer: int
     distances: tuple[float, ...]
 
     def settles_at(self, epsilon: float) -> int | None:
-        """First offset past the cut after which the gap never exceeds epsilon.
-
-        None means it never settles, so a shadow would have to run to the end.
-        """
+        """First offset after which the gap never exceeds epsilon. None if it never does."""
         if epsilon < 0:
             raise ValueError(f"epsilon must not be negative, got {epsilon}")
         for index in range(len(self.distances)):
@@ -59,11 +49,8 @@ def compare(
     right_from: int,
     use_values: bool = True,
 ) -> list[Decay]:
-    """Gap per layer between two caches, walking each from its own offset.
-
-    The offsets exist so an unedited cache can be lined up against an edited one.
-    The token sitting at `end` before the cut sits at `start` after it, so the
-    same content is compared even though the two caches are different lengths.
+    """Offsets line a longer cache up against a shorter one, so the same content is
+    compared on both sides.
     """
     if len(left) != len(right):
         raise ValueError(f"{len(left)} left layers, {len(right)} right")
@@ -91,7 +78,7 @@ def compare(
 def decay(
     spliced: list[Layer], honest: list[Layer], cut_at: int, use_values: bool = True
 ) -> list[Decay]:
-    """Gap per layer from the cut onward, between caches of the same length."""
+    """Gap per layer from the cut onward, for caches of the same length."""
     if len(spliced) != len(honest):
         raise ValueError(f"{len(spliced)} spliced layers, {len(honest)} honest")
     if not spliced:
@@ -107,10 +94,7 @@ def decay(
 
 
 def shadow_length(decays: list[Decay], epsilon: float) -> int | None:
-    """How long a shadow must run for every layer to be within epsilon.
-
-    None if any layer never settles: at that epsilon the shadow runs to the end.
-    """
+    """How long a shadow must run for every layer to be within epsilon."""
     settles = [d.settles_at(epsilon) for d in decays]
     if any(s is None for s in settles):
         return None

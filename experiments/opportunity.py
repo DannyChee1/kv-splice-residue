@@ -1,13 +1,6 @@
-"""Gate 2: how much prefill does a real agent run actually repeat?
+"""Gate 2: how much prefill does a real agent run repeat?
 
-Reads collected traces, simulates a prefix cache with no capacity limit, and
-reports the share of computed tokens that were repeats. Unlimited capacity makes
-the answer a floor: a real engine evicts and shares the GPU, which only pushes
-the number up.
-
-    python -m experiments.opportunity --traces data/traces --tokenizer <hf-name>
-
-No GPU needed. The tokenizer is only used to count.
+Unlimited cache capacity makes the answer a floor. No GPU needed.
 """
 
 from __future__ import annotations
@@ -28,12 +21,8 @@ def plain(messages):
 
 
 def chat_renderer(tokenizer):
-    """Pick one renderer for the whole run, and say which was picked.
-
-    Most chat templates refuse the shape agent traces actually have, since roles
-    never alternate. Choosing per call would mix two renderings in one run and
-    invent cache misses, so the choice is made once here and anything that fails
-    afterwards is a real error, not something to paper over.
+    """Chat templates reject the non-alternating roles agent traces have. Choosing
+    per call would mix two renderings in one run and invent cache misses.
     """
     probe = [{"role": role, "content": "x"} for role in SHAPE]
     try:

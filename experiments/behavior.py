@@ -1,13 +1,7 @@
-"""Does the leftover change what the model says?
+"""Does the leftover change what the model says, or only the cache?
 
-Each recall probe is scored three ways. `recoverable` is the number that matters:
-the share of the fact's value that a splice keeps and an honest reprefill loses.
-
-    ~0   the splice recalls no better than an honest reprefill, so the leftover
-         is real in the cache and invisible in behaviour
-    ~1   the splice still knows the fact whose tokens are gone
-
-    python -m experiments.behavior --model <hf-name> --out results/behavior.json
+`recoverable` near 0 means the splice recalls no better than an honest
+reprefill; near 1 means it still knows a fact whose tokens are gone.
 """
 
 from __future__ import annotations

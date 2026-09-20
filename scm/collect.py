@@ -1,17 +1,9 @@
-"""Turn an OpenHands event stream into a Trace.
+"""Replay an OpenHands event stream into the prompts the model saw.
 
-Running the agent is somebody else's job. This reads the events it left behind
-and replays them the way the harness does, so we recover the prompt the model saw
-on each step and the edits that happened in between.
-
-Replay rules come from `llm_summarizing_condenser.py`; see notes/harness-survey.md.
-A Condensation drops a contiguous run of events and puts a summary where the run
-started. The event itself never records why it fired, so we infer that: a pending
-CondensationRequest before it means somebody asked, and anything else means a
-threshold tripped on its own.
-
-`to_message` is best-effort until we have checked it against a real dump. It is a
-parameter so a wrong guess costs a callback, not a rewrite.
+A Condensation never records why it fired, so we infer it: a pending
+CondensationRequest means somebody asked, anything else means a threshold.
+`to_message` is a parameter because it is guesswork until checked against a
+real dump.
 """
 
 from __future__ import annotations
@@ -47,7 +39,7 @@ class CollectError(ValueError):
 
 
 def _text_of(event: dict) -> str:
-    """Dig the text out of an event, trying the shapes the SDK actually uses."""
+    """Dig the text out of an event, trying the shapes the SDK uses."""
     for key in ("summary", "text", "content", "message"):
         value = event.get(key)
         if isinstance(value, str):
@@ -64,7 +56,7 @@ def _text_of(event: dict) -> str:
 
 
 def default_to_message(event: dict) -> Message | None:
-    """Best-effort event to Message. Returns None for events the LLM never sees."""
+    """Best-effort event to Message. None for events the LLM never sees."""
     kind = event.get("kind", "")
     if kind in (CONDENSATION, CONDENSATION_REQUEST):
         return None
@@ -96,7 +88,7 @@ def _apply(
     requested: bool,
     max_size: int | None,
 ) -> ContextChange:
-    """Drop the forgotten events from the view and slot the summary in."""
+    """Drop the forgotten events and slot the summary in."""
     span = _span_of([e["id"] for e in view], set(event.get("forgotten_event_ids", [])))
     before = len(view)
     del view[span[0] : span[1]]
@@ -138,11 +130,7 @@ def build_trace(
     to_message: EventToMessage = default_to_message,
     max_size: int | None = 240,
 ) -> Trace:
-    """Replay an event stream into the prompts the model saw, turn by turn.
-
-    A turn ends when the agent's llm_response_id changes, so parallel tool calls
-    from one response stay in the same turn.
-    """
+    """A turn ends when llm_response_id changes, so parallel tool calls stay together."""
     view: list[dict] = []
     turns: list[Turn] = []
     pending: ContextChange | None = None

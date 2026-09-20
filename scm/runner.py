@@ -1,19 +1,8 @@
 """Run one probe three ways through a real model.
 
-    full        prefill the original prompt, decode
-    reprefill   prefill the shortened prompt, decode
-    spliced     prefill the original, cut the span out of the cache, decode
-
-All three prefill everything but the last token and then feed that token as the
-first decode step. That way the spliced path has somewhere to put its first
-forward pass: its cache is a token short, so the token it is handed lands at the
-right position without being cached twice. The span sits in the middle of the
-prompt, so the last token is the same one in all three paths.
-
-Layer 0 is the check that the plumbing works. Its keys and values come from the
-token embedding alone, so nothing upstream can colour them, and spliced must
-match reprefill there to rotation precision. Deeper layers are allowed to
-disagree, and that disagreement is the whole measurement.
+All paths prefill everything but the last token and feed that as the first
+decode step, so the spliced path's shorter cache lands its token at the right
+position.
 """
 
 from __future__ import annotations
@@ -73,11 +62,8 @@ def preset_for_type(model_type: str) -> tuple[str, int | None, bool]:
 
 
 def preset_for(name: str) -> tuple[str, int | None, bool]:
-    """Fallback guess from a repo name, for when no config is to hand.
-
-    Refuses an ambiguous name rather than letting dict order decide. A repo
-    called DeepSeek-R1-Distill-Llama-8B is a Llama, but nothing in the string
-    says so, and picking the wrong one rotates the wrong tensor.
+    """Fallback guess from a repo name. Refuses an ambiguous one rather than letting
+    dict order decide.
     """
     lowered = name.lower()
     hits = [key for key in PRESETS if key in lowered]
@@ -116,13 +102,8 @@ def load(
     rope_dim: int | None = None,
     remote_code: bool = False,
 ) -> Target:
-    """Load weights, preferring the implementation that ships with transformers.
-
-    `remote_code` stays off on purpose. A repo's own modeling file is written
-    against whatever transformers existed when it was uploaded, and more to the
-    point, everything we know about the MLA cache layout was measured against
-    the native classes. Custom code could cache differently and the splice would
-    be wrong without saying so.
+    """`remote_code` stays off: the MLA cache layout was measured against the native
+    classes, and custom code could cache differently without saying so.
     """
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -164,11 +145,8 @@ def rope_width(config) -> int | None:
 
 
 def model_freqs(model, width: int | None = None):
-    """Take the model's own inv_freq rather than rebuilding it from a base.
-
-    YaRN and the other scalings bend the frequency ladder, so a ladder rebuilt
-    from `base` rotates by the wrong angle and every number downstream is quietly
-    wrong. DeepSeek-V2-Lite is a yarn model, so this is not hypothetical.
+    """YaRN and friends bend the frequency ladder, so rebuilding it from a base
+    rotates by the wrong angle.
     """
     for module in model.modules():
         freqs = getattr(module, "inv_freq", None)
@@ -181,11 +159,7 @@ def model_freqs(model, width: int | None = None):
 
 
 def rope_base(config) -> float:
-    """Read the RoPE base, wherever this transformers version keeps it.
-
-    Guessing 10000 would be silently wrong on Llama 3.1 and friends at 500000,
-    and a wrong base rotates by the wrong angle, so refuse instead of guessing.
-    """
+    """Guessing 10000 is silently wrong on models at 500000, so refuse instead."""
     params = getattr(config, "rope_parameters", None)
     if isinstance(params, dict) and "rope_theta" in params:
         return float(params["rope_theta"])
@@ -291,11 +265,8 @@ def run_probe(target: Target, probe: Probe, steps: int = 128) -> Trial:
 
 
 def layer_zero_error(target: Target, probe: Probe) -> float:
-    """rel-L2 between the spliced and honestly reprefilled layer-0 keys.
-
-    Layer 0 depends only on token embeddings, so this should sit at rotation
-    precision. Anything larger means the splice or the positions are wrong, not
-    that residue was found.
+    """Layer 0 comes from embeddings alone, so anything above rotation precision
+    means the splice is wrong, not that residue was found.
     """
     from scm.rotate import relative_l2
 
@@ -310,10 +281,8 @@ def layer_zero_error(target: Target, probe: Probe) -> float:
 
 
 def score_answer(target: Target, past, first_token: int, answer_ids: list[int]) -> float:
-    """Teacher-force an answer through a cache and report its mean log-probability.
-
-    Sensitive where an argmax is not: a leftover that lifts the answer from
-    unlikely to plausible shows up here even when it never wins the argmax.
+    """Sensitive where an argmax is not: a leftover can lift an answer without ever
+    winning.
     """
     from scm.recall import mean_logprob
 
@@ -328,7 +297,7 @@ def score_answer(target: Target, past, first_token: int, answer_ids: list[int]) 
 
 
 def run_recall(target: Target, probe, steps: int = 0) -> dict:
-    """Score one recall probe three ways and report what the splice kept."""
+    """Score one recall probe three ways."""
     from scm.recall import Score, span_tokens
 
     start, end = span_tokens(probe, target.tokenizer)

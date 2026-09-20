@@ -1,25 +1,11 @@
-"""Which reference does a spliced cache behave like?
+"""Which reference a spliced cache behaves like.
 
-Every edit is run three ways and the decodes compared:
+    full        original prompt, edit never applied
+    reprefill   edited prompt, prefilled honestly
+    spliced     original prefilled, then patched
 
-    full        the original prompt, prefilled honestly, edit never applied
-    reprefill   the edited prompt, prefilled honestly
-    spliced     the original prefilled, then patched in place
-
-`full` is the model still under the deleted span's influence; `reprefill` is the
-model genuinely rid of it. A trial only tells us anything when those two part
-ways, so `references_diverge` gates every count.
-
-Leyline reports its splice tracking `full`, and reads that as the contract
-holding: the edit was positional, and the cache keeping its history is the
-intended behavior. We read the same result as the problem, since a deletion that
-leaves the deleted content steering the model has not deleted much. SCM
-recomputes under the edited context, so it should track `reprefill` by
-construction. Putting both through one verdict is the experiment.
-
-Metrics follow theirs so the numbers line up: first-token agreement, mean common
-prefix over a greedy decode, KL, and top-k overlap. Tensor distance is rel-L2 in
-scm.rotate, next to the rotation whose error it measures.
+Only trials where the two references separate carry any signal. Leyline reads
+its splice tracking `full` as the contract holding; we read it as the problem.
 """
 
 from __future__ import annotations
@@ -46,7 +32,7 @@ def common_prefix_length(a: Sequence[int], b: Sequence[int]) -> int:
 
 
 def kl_divergence(p_logits: torch.Tensor, q_logits: torch.Tensor) -> float:
-    """KL(p || q) in nats, from raw logits over one vocabulary."""
+    """KL(p || q) in nats, from raw logits."""
     if p_logits.shape != q_logits.shape:
         raise ValueError(f"shapes differ: {p_logits.shape} vs {q_logits.shape}")
     p_log = torch.log_softmax(p_logits.to(torch.float32), dim=-1)
@@ -84,7 +70,7 @@ class Trial:
 
     @property
     def references_diverge(self) -> bool:
-        """Did the edit change the model's answer at all? Nothing to see if not."""
+        """Did the edit change the answer at all? Nothing to see if not."""
         return self.full.tokens[0] != self.reprefill.tokens[0]
 
     @property
@@ -127,7 +113,7 @@ class Report:
 
     @property
     def tracks_reprefill(self) -> float:
-        """Share of informative trials where the splice behaved like honest prefill."""
+        """Share of informative trials that behaved like an honest prefill."""
         if not self.informative:
             return 0.0
         return self.verdicts.get(REPREFILL, 0) / self.informative

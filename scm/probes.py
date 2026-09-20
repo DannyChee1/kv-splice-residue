@@ -1,19 +1,7 @@
-"""Prompts built so you can tell whether a deletion really took.
+"""Prompts with one removable span and two different answers.
 
-Each probe is a prompt with one removable span and two different answers: what
-the model says while the span still reaches it, and what it says once the span
-is genuinely gone. A probe whose two answers match proves nothing, so they must
-differ.
-
-Leyline's worked example deletes a calculation the model needed, so keeping its
-influence gives the right answer and their splice looks good. That is one
-polarity. The cases SCM is for are the other one, where the span is wrong,
-private, or retracted, and keeping its influence is the failure. `harm` records
-which side is the bad outcome, and both polarities are kept here on purpose:
-a suite that only contains probes flattering to SCM would not convince anyone.
-
-Spans have to land on token boundaries, since the splice cuts whole entries.
-`token_span` checks that and refuses rather than cutting a token in half.
+`harm` records which answer is the outcome you would not ship. Both polarities
+are kept on purpose, since a suite that only flattered SCM would convince nobody.
 """
 
 from __future__ import annotations
@@ -36,12 +24,7 @@ class ProbeError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Probe:
-    """One deletable span, and what its presence is worth.
-
-    `retained_answer` is the reply expected while the span still influences the
-    model. `erased_answer` is the reply once it does not. `harm` names whichever
-    of the two is the outcome you would not want to ship.
-    """
+    """`harm` names whichever of the two answers you would not want to ship."""
 
     name: str
     prefix: str
@@ -82,10 +65,8 @@ class Probe:
 
 
 def token_span(probe: Probe, tokenizer: Tokenizer) -> tuple[int, int]:
-    """Where the span sits in the tokenized full prompt, as [start, end).
-
-    Refuses a span that does not line up, because a splice that starts mid-token
-    would make every downstream comparison meaningless.
+    """Refuses a ragged span, since splicing mid-token makes everything downstream
+    meaningless.
     """
     full = tokenizer.encode(probe.full)
     head = tokenizer.encode(probe.prefix)
@@ -189,10 +170,7 @@ _KINDS = ("expr", "stmt", "block", "atom")
 
 
 def history(steps: int, seed: int = 0) -> str:
-    """Filler that reads like a coding agent's trajectory.
-
-    Deterministic for a seed, so a padded probe is the same every run.
-    """
+    """Filler that reads like a coding agent's trajectory. Deterministic per seed."""
     if steps < 0:
         raise ProbeError(f"steps must not be negative, got {steps}")
     rng = random.Random(seed)
@@ -212,12 +190,8 @@ def history(steps: int, seed: int = 0) -> str:
 
 
 def pad(probe: Probe, before: int = 0, after: int = 0, seed: int = 0) -> Probe:
-    """Sink the span into a realistic trajectory.
-
-    `before` sets how deep the span sits, which is what puts it at the absolute
-    positions a real deletion happens at. `after` is the one that matters more:
-    the leftover lives in the entries downstream of the cut, so a probe whose
-    suffix is one short question gives it almost nowhere to show up.
+    """`after` matters more than `before`: the leftover lives downstream of the cut,
+    so a one-line suffix gives it nowhere to show up.
     """
     prefix = history(before, seed) + probe.prefix if before else probe.prefix
     suffix = history(after, seed + 1) + probe.suffix if after else probe.suffix

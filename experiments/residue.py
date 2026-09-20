@@ -1,15 +1,7 @@
 """Gate 1: does the leftover from a positional splice change what the model says?
 
-Runs every probe at several padding depths, three paths each, and reports which
-reference the spliced cache tracked. The number that matters is how often it
-tracked `reprefill`: Leyline reports ~0 on Moonlight, and SCM should be ~1 by
-construction, since it recomputes under the edited context.
-
-    python -m experiments.residue --model <hf-name> --out results/residue.json
-
-Use --model deepseek-ai/DeepSeek-V2-Lite as the control. Its two references
-barely diverge, so almost every trial is uninformative; if that run reports many
-informative trials, something is wrong before any result is believable.
+DeepSeek-V2-Lite is the control. Its two references barely diverge, so many
+informative trials there means something is wrong before anything is believable.
 """
 
 from __future__ import annotations

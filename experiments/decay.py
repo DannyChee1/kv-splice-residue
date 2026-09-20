@@ -1,9 +1,7 @@
-"""Gate 3 entry point: measure how fast a deletion's influence fades.
+"""Gate 3: how far past a cut does its influence reach?
 
-    python -m experiments.decay --model <hf-name> --out results/decay.json
-
-Reports, per epsilon, how many tokens a shadow track would have to run before the
-main track's entries are within tolerance. That number is the cost of exactness.
+Reports how long a shadow would have to run per epsilon, which is the cost of
+being exact.
 """
 
 from __future__ import annotations

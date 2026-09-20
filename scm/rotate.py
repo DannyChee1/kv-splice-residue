@@ -1,19 +1,6 @@
-"""RoPE re-anchoring: move a cached key as if it had been prefilled elsewhere.
+"""RoPE composes, so re-anchoring a cached key is a single rotation by delta.
 
-Deleting a span shifts everything after it by delta positions. RoPE composes,
-R(a)R(b) = R(a+b), so turning a key cached at position p into the key an honest
-prefill would have produced at p+delta is one rotation by delta. The angle only
-depends on delta, so every shifted key takes the same rotation.
-
-This is the cheap splice we are measuring against, not something SCM needs. It
-fixes where a key sits and nothing else: the value vectors, and the parts of the
-key RoPE never touched, still carry whatever the deleted span did to them. That
-leftover is the point of the experiment.
-
-Two layouts exist and picking the wrong one is silent, so callers say which:
-
-    interleaved   pairs are (0,1), (2,3), ...      GPT-J, DeepSeek MLA
-    half_split    pairs are (j, j + dim/2)         GPT-NeoX, Llama
+Layout is an explicit argument because picking the wrong one fails silently.
 """
 
 from __future__ import annotations
@@ -33,7 +20,7 @@ def _check(dim: int, layout: str) -> None:
 
 
 def inv_freq(dim: int, base: float = 10000.0, device=None) -> torch.Tensor:
-    """Per-pair angular frequency, one entry for each of the dim/2 pairs."""
+    """Angular frequency per rotated pair."""
     steps = torch.arange(0, dim, 2, dtype=torch.float32, device=device)
     return 1.0 / (base ** (steps / dim))
 
@@ -66,7 +53,7 @@ def apply_rope(
     layout: str = INTERLEAVED,
     base: float = 10000.0,
 ) -> torch.Tensor:
-    """Put keys at absolute positions, the way a prefill would. Reference only."""
+    """Place keys at absolute positions, the way a prefill would. Reference only."""
     _check(x.shape[-1], layout)
     if positions.shape[0] != x.shape[-2]:
         raise ValueError(
@@ -85,15 +72,8 @@ def rotate(
     base: float = 10000.0,
     freqs: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Re-anchor already-placed keys by delta positions.
-
-    One angle for the whole tensor, since R(delta) does not depend on where the
-    key started. Negative delta moves keys earlier, which is the deletion case.
-
-    `freqs` overrides the frequencies, and real models nearly always need it.
-    YaRN and the other scalings bend the frequency ladder away from
-    `1 / base ** (2i/d)`, so recomputing from a base silently rotates by the
-    wrong angle. Hand in the model's own inv_freq and the question goes away.
+    """Real models need `freqs`: YaRN and friends bend the ladder away from
+    `1 / base ** (2i/d)`, so rebuilding it from a base rotates by the wrong angle.
     """
     _check(x.shape[-1], layout)
     if freqs is None:
@@ -106,7 +86,7 @@ def rotate(
 
 
 def relative_l2(actual: torch.Tensor, expected: torch.Tensor) -> float:
-    """Leyline reports rel-L2, so we report it the same way."""
+    """Leyline reports rel-L2, so we do too."""
     scale = torch.linalg.vector_norm(expected.to(torch.float32))
     if scale == 0:
         raise ValueError("expected tensor is all zeros, rel-L2 undefined")

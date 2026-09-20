@@ -1,22 +1,7 @@
-"""Run the residue experiment on Modal.
+"""Run the experiments on Modal.
 
-Modal bills by the second, so the layout here is about not paying for an H100 to
-sit and wait. Weights are pulled on a cheap CPU worker into a Volume, and the GPU
-function mounts that Volume and finds them already there. Downloading 30GB on the
-GPU instead would cost a hundred times as much for the same bytes.
-
-Order of operations, cheapest first:
-
-    modal run modal_app.py --action smoke
-    modal run modal_app.py --action fetch --model deepseek-ai/DeepSeek-V2-Lite
-    modal run modal_app.py --action residue --model deepseek-ai/DeepSeek-V2-Lite
-    modal run modal_app.py --action fetch --model moonshotai/Moonlight-16B-A3B-Instruct
-    modal run modal_app.py --action residue --model moonshotai/Moonlight-16B-A3B-Instruct
-
-Read the DeepSeek-V2-Lite run before starting Moonlight. It is the control: its
-two references barely diverge, so it should report almost no informative trials.
-If it reports many, something is wrong and Moonlight's numbers would not mean
-anything either.
+Weights are fetched on a CPU worker into a Volume, so the GPU never pays for
+the download. Run the DeepSeek-V2-Lite control before trusting Moonlight.
 """
 
 import modal
@@ -62,7 +47,7 @@ def residue(
     steps: int = 128,
     dtype: str = "bfloat16",
 ) -> dict:
-    """The three-path run. Everything it needs is already in the Volume."""
+    """The three-path run."""
     import json
     import subprocess
     import sys
@@ -88,12 +73,7 @@ def residue(
     memory=65536,
 )
 def decay(model: str, padding: int = 40, dtype: str = "bfloat16") -> dict:
-    """Measure the leftover directly, per layer, instead of inferring it.
-
-    The verdicts read residue off decoded tokens, which is noisy and only sees
-    the first one. This compares the spliced cache against an honest one entry by
-    entry, so a flat curve means there is nothing to be exact about.
-    """
+    """Measure the leftover directly, instead of inferring it from decoded tokens."""
     import json
     import subprocess
     import sys

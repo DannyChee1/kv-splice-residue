@@ -1,18 +1,8 @@
 """How much prefill does an agent run repeat?
 
-Simulates a prefix cache with no capacity limit, which is the friendliest cache
-that could exist. Whatever it still has to recompute is work no cache can avoid,
-so the numbers here are a floor, not an estimate. Real engines evict and share
-GPUs with other requests, which only pushes the number up.
-
-Each turn's prompt splits three ways:
-
-    cached    the longest prefix the cache already holds
-    reused    past the prefix, but this message appeared in an earlier turn
-    novel     past the prefix, and genuinely new
-
-Only `reused` is worth attacking. `novel` is a new tool result or the model's
-own last reply, and nobody can have that ready ahead of time.
+The cache here has no capacity limit, so whatever it still recomputes is a
+floor. Real engines evict and share GPUs, which only pushes the number up.
+Only `reused` is worth attacking; `novel` is content nobody could have ready.
 """
 
 from __future__ import annotations
@@ -38,11 +28,7 @@ def simple_render(messages: Sequence[Message]) -> str:
 def message_spans(
     messages: Sequence[Message], render: Renderer, tokenizer: Tokenizer
 ) -> list[tuple[int, int]]:
-    """Token range each message occupies in the rendered prompt.
-
-    Renders growing prefixes instead of messages alone, so a template that
-    merges tokens across a boundary still lands in the right place.
-    """
+    """Renders growing prefixes, since a template can merge tokens across a boundary."""
     spans: list[tuple[int, int]] = []
     start = 0
     for index in range(len(messages)):
@@ -57,11 +43,8 @@ def message_spans(
 
 
 class PrefixCache:
-    """Holds every prompt it has seen, and matches new ones by common prefix.
-
-    Because any prefix of a stored sequence counts as a hit, this is the best a
-    prefix cache can do. `block_size` rounds a hit down to a whole block, the
-    way vLLM does at 16; leave it at 1 for the friendliest case.
+    """Any prefix of a stored sequence counts as a hit, so this is the best a prefix
+    cache can do. `block_size` 16 matches vLLM; 1 is the friendliest case.
     """
 
     def __init__(self, block_size: int = 1) -> None:
@@ -133,7 +116,7 @@ class TraceStats:
         return self.reused_tokens / self.computed_tokens if self.computed_tokens else 0.0
 
     def reused_by_decider(self) -> dict[str, int]:
-        """Repeated tokens grouped by who caused the edit that turn."""
+        """Repeated tokens grouped by who caused that turn's edit."""
         totals: dict[str, int] = {}
         for turn in self.turns:
             if turn.reused_tokens:
@@ -184,7 +167,7 @@ def simulate(
 
 
 def summarize(all_stats: Iterable[TraceStats]) -> dict[str, float | int]:
-    """Roll several traces into the handful of numbers the gate turns on."""
+    """Roll several traces into the numbers the gate turns on."""
     traces = list(all_stats)
     prompt = sum(s.prompt_tokens for s in traces)
     computed = sum(s.computed_tokens for s in traces)

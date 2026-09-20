@@ -1,8 +1,7 @@
 """Schema for agent rollout traces.
 
-A Trace is one agent run, say a single SWE-bench instance. A Turn is one LLM
-call inside it. Turns keep messages rather than token ids, because we collect
-traces with one model and replay them against another.
+Turns keep messages rather than token ids, because traces are collected with
+one model and replayed against another.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ class ChangeKind(StrEnum):
 
 
 class Decider(StrEnum):
-    """Who decided the change. Harness-decided ones are the predictable ones."""
+    """Harness-decided changes are the predictable ones."""
 
     HARNESS = "harness"
     MODEL = "model"
@@ -84,10 +83,8 @@ class Trigger:
 class ContextChange:
     """An edit to the history, applied between two turns.
 
-    Spans are half-open [start, end) positions in the list as it stood when the
-    edit landed, which `view_size` records. That list is longer than the previous
-    turn's prompt, since the agent's own reply and any tool output joined it
-    since. We count messages rather than tokens because tokenizing happens later.
+    Spans index the list as it stood when the edit landed, which `view_size`
+    records. That list is longer than the previous turn's prompt.
     """
 
     kind: ChangeKind
@@ -145,8 +142,9 @@ class ContextChange:
 
 @dataclass(frozen=True, slots=True)
 class Usage:
-    """Token counts as the provider reported them. cached_prompt_tokens is what
-    its prefix cache already had, so we get that signal without our own engine."""
+    """Token counts as the provider reported them. cached_prompt_tokens is its own
+    prefix-cache signal.
+    """
 
     prompt_tokens: int | None = None
     cached_prompt_tokens: int | None = None
@@ -249,10 +247,7 @@ class Trace:
 
 
 def validate(trace: Trace) -> None:
-    """Checks that need to see more than one turn.
-
-    Everything checkable from a single object lives in that object's __post_init__.
-    """
+    """Checks that need to see more than one turn."""
     if not trace.turns:
         raise SchemaError(f"{trace.program_id}: no turns")
 

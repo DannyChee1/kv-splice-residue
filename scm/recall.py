@@ -1,22 +1,8 @@
 """Can the model still recall a fact whose tokens have been cut out?
 
-The earlier probes asked about the span directly, so deleting it left nothing to
-answer from and every path agreed. That tests nothing: direct attention is gone
-whether you splice or reprefill honestly.
-
-A recall probe puts a bridge between the fact and the question. The bridge refers
-back to the fact without repeating it ("I connected to that host"), so the bridge
-tokens' own cache entries are the only place the fact survives a cut. Those
-entries are exactly what a positional splice carries over untouched and an honest
-reprefill rebuilds without ever seeing the fact.
-
-    full        fact present
-    reprefill   fact gone, bridge recomputed without it
-    spliced     fact's tokens gone, bridge entries kept from when it was there
-
-Scoring is the mean log-probability of the answer under teacher forcing, not an
-argmax. A residue that shifts the answer from unlikely to likely is real even
-when it never wins the argmax, and argmax is what made the last run unreadable.
+The bridge refers back to the fact without repeating it, so the bridge's own
+cache entries are the only place it survives a cut. Scoring is mean log-prob,
+not argmax, because a leftover can lift an answer without ever winning.
 """
 
 from __future__ import annotations
@@ -115,7 +101,7 @@ SUITE: tuple[Recall, ...] = (
 
 
 def span_tokens(probe: Recall, tokenizer) -> tuple[int, int]:
-    """Token range of the fact inside the full prompt, refusing a ragged cut."""
+    """Token range of the fact, refusing a ragged cut."""
     full = tokenizer.encode(probe.full)
     head = tokenizer.encode(probe.prefix)
     through = tokenizer.encode(probe.prefix + probe.span)
@@ -138,11 +124,8 @@ class Score:
 
     @property
     def recoverable(self) -> float:
-        """How much of the fact's value the splice keeps that a reprefill loses.
-
-        1.0 means the splice recalls as well as if the fact were never cut;
-        0.0 means it recalls no better than an honest reprefill. Residue that
-        matters behaviourally shows up here and nowhere else.
+        """1.0 means the splice recalls as if nothing was cut, 0.0 means no better than
+        an honest reprefill.
         """
         room = self.full - self.reprefill
         if room <= 0:
@@ -153,7 +136,7 @@ class Score:
 
 
 def mean_logprob(logits: torch.Tensor, targets: torch.Tensor) -> float:
-    """Mean log-probability the given logits assign to the target tokens."""
+    """Mean log-probability the logits assign to the target tokens."""
     if logits.shape[0] != targets.shape[0]:
         raise RecallError(
             f"{logits.shape[0]} logit rows for {targets.shape[0]} targets"

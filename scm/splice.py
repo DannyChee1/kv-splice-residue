@@ -1,22 +1,9 @@
-"""Cut a span out of a KV cache without re-prefilling what follows.
+"""Leyline's positional splice, in plain PyTorch rather than their fused kernel.
 
-A reference implementation of the positional splice Leyline specifies, written
-in plain PyTorch rather than their fused MLA kernel. It is here to reproduce the
-behavior, not the performance. Drop the span's entries, then re-anchor every key
-after it by rotating down `end - start` positions so the arithmetic lines up.
+Values and the position-free part of the key carry over untouched. That leftover
+is what everything downstream is trying to measure.
 
-What the rotation does not reach is what we are measuring. Values carry over
-unchanged, and on MLA so does the part of the key RoPE never covers. Both were
-computed while the model was attending to the span now being removed. Leyline
-says so plainly and means it: the contract is positional, not informational, and
-skipping that recompute is the cost the splice exists to avoid.
-
-An honest prefill of the shortened prompt carries none of that history, which is
-what SCM produces and what makes the two tellable apart. `scm.agreement` does
-the telling.
-
-Caches are [..., seq, head_dim] with sequence second from last, matching the
-layout HuggingFace hands back.
+Caches are [..., seq, head_dim], as HuggingFace hands them back.
 """
 
 from __future__ import annotations
@@ -50,11 +37,7 @@ def splice_keys(
     base: float = 10000.0,
     freqs: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Drop keys [start, end) and re-anchor the rest by the shift.
-
-    `rope_dim` is the width of the trailing slice RoPE actually covers, for MLA
-    where the rest of the key is position-free. None means the whole key.
-    """
+    """`rope_dim` is the trailing slice RoPE covers, for MLA. None means the whole key."""
     _check_span(keys.shape[SEQ], start, end)
     delta = -(end - start)
     if delta == 0:
@@ -77,7 +60,7 @@ def splice_keys(
 
 
 def splice_values(values: torch.Tensor, start: int, end: int) -> torch.Tensor:
-    """Drop values [start, end). The survivors are copied over as they are."""
+    """Drop values [start, end). Survivors are copied as they are."""
     _check_span(values.shape[SEQ], start, end)
     if start == end:
         return values
@@ -110,16 +93,8 @@ def splice_layer(
     mla: bool = False,
     freqs: torch.Tensor | None = None,
 ) -> Layer:
-    """Cut a span from one layer.
-
-    `mla` swaps which tensor gets rotated. HuggingFace's MLA does not cache keys
-    and values at all: the `keys` slot holds the compressed KV latent and the
-    `values` slot holds k_pe, the only part RoPE ever touched. So the rotation
-    belongs on `values`, whole, and the latent is carried across untouched.
-
-    That makes the leftover starker than on ordinary attention. The latent is
-    position-free by construction, so no rotation could repair it even in
-    principle, and it holds everything the model took from the span being cut.
+    """MLA's `keys` slot holds the latent and `values` holds k_pe, so on MLA the
+    rotation goes on `values` and the latent is carried over untouched.
     """
     if mla:
         return Layer(
@@ -144,7 +119,7 @@ def splice_cache(
     mla: bool = False,
     freqs: torch.Tensor | None = None,
 ) -> list[Layer]:
-    """Apply the same cut to every layer. One directive, one span, whole stack."""
+    """Apply the same cut to every layer."""
     if not cache:
         raise SpliceError("cache has no layers")
     lengths = {layer.length for layer in cache}
